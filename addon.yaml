@@ -1,0 +1,38 @@
+# Semaphore UI integration: one entry per Semaphore server (Ansible / Terraform runner).
+# Shows each project's task templates with how their last run went, and runs a template when
+# you press its button (always asks first). It also adds and keeps in step the jobs listed in
+# ~/Hisho/System/Config/Addons/semaphore-templates.yaml (it never runs or deletes them), so a new
+# guarded job is one entry in your notes. Failed and missed scheduled runs, and a Semaphore that stops
+# answering, show in Needs you. Updates and maintenance stay in your playbooks. Needs an API token (Semaphore: your user menu >
+# API Tokens, or POST /api/user/tokens).
+name: semaphore
+kind: integration
+secret_rotate: Semaphore > your user > API Tokens
+title: Semaphore (Ansible / Terraform)
+description: Your Semaphore servers' playbooks and Terraform jobs, their last runs, a run button, and new jobs added from your notes.
+version: 0.3.2
+you_need:
+  - "A Semaphore UI server (Ansible and Terraform runner) you can reach from the Core machine"
+  - "A Semaphore API token"
+provider: provider.py
+# Install in Hisho: Semaphore itself, when there is none (Hisho's install, pinned images)
+companion:
+  title: Semaphore
+  install: companion/install.sh
+  data_dir: ~/semaphore
+  ports: {http: 3010}
+  health: {http: "http://127.0.0.1:3010/api/ping", expect: 200, timeout: 300}
+  detect: {containers: [semaphore], http: ["http://127.0.0.1:3010/api/ping"], entry: url}
+  entry: {url: "https://{core_dns}:4443"}
+  requires: [docker, tailscale]
+entry_label: Semaphore server
+entry_schema:
+  url: str                 # IP or name (http, port 3000 assumed), or the full URL
+  token: password          # API token (typed, or its secret's name)
+  timezone: "str?"         # the Semaphore's schedule time zone (SEMAPHORE_SCHEDULE_TIMEZONE); default UTC
+  note: "str?"
+entry_form:
+  url: "IP address (or full URL)"
+  token: "API token (paste it, or its secret's name)"
+  timezone: "Schedule time zone (e.g. America/Los_Angeles; blank = UTC)"
+  note: "Note"
