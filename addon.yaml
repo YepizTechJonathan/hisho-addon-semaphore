@@ -10,7 +10,7 @@ kind: integration
 secret_rotate: Semaphore > your user > API Tokens
 title: Semaphore (Ansible / Terraform)
 description: Your Semaphore servers' playbooks and Terraform jobs, their last runs, a run button, and new jobs added from your notes.
-version: 0.3.2
+version: 0.3.3
 you_need:
   - "A Semaphore UI server (Ansible and Terraform runner) you can reach from the Core machine"
   - "A Semaphore API token"
@@ -36,3 +36,19 @@ entry_form:
   token: "API token (paste it, or its secret's name)"
   timezone: "Schedule time zone (e.g. America/Los_Angeles; blank = UTC)"
   note: "Note"
+
+# Plain words for each field of the entry form (shown on the dashboard).
+help:
+  url:
+    label: Semaphore address
+    say: "Where Semaphore is: its full web address, like https://semaphore.example.com, or just its IP address or name (then Hisho uses http and port 3000). Filled in for you if Hisho installed Semaphore."
+  token:
+    label: API token
+    say: "A Semaphore API token: paste it, or type the name of a saved secret that holds it. In Semaphore it is under your user menu > API Tokens. If Hisho installed Semaphore, its install can save one for you as a secret."
+    get: "https://docs.semaphoreui.com/administration-guide/api"
+    get_label: Read how to make a token
+  timezone:
+    label: Time zone of its schedules (optional)
+    say: "The time zone Semaphore runs its schedules in, like America/Los_Angeles. Hisho uses it to tell when a scheduled run was missed. Leave empty for UTC. Hisho's own install uses your time zone."
+  note:
+    say: "Anything you want to remember about this server. Shown on its card."

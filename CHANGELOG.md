@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- Every field on its setup form says in plain words what it is, and links to where to get it (addon.yaml `help:`, shown by Hisho's dashboard).
+
 ## 0.3.2
 
 - Install in Hisho: with no Semaphore yet, its page installs one on the Core machine (Hisho's own install: Docker, PostgreSQL, tailnet port 4443, your time zone) and fills in the address; never over an existing Semaphore.
