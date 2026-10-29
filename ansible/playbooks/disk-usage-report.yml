@@ -1,0 +1,21 @@
+---
+# Read-only: how full each machine's disks are.
+- name: Disk usage report
+  hosts: all
+  gather_facts: false
+  ignore_unreachable: true
+  pre_tasks:
+    - name: Hisho maintenance gate
+      ansible.builtin.import_tasks: ../tasks/hisho_maintenance_gate.yml
+  tasks:
+    - name: Local filesystems
+      ansible.builtin.command: df -hPT -x tmpfs -x devtmpfs -x squashfs -x overlay
+      changed_when: false
+      failed_when: false
+      register: all_df
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          filesystems: "{{ all_df.stdout_lines | default([]) }}"

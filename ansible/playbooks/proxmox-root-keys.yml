@@ -1,0 +1,53 @@
+---
+# Root's SSH keys on the Proxmox servers (inventory group proxmox_hosts). Proxmox keeps them in
+# /etc/pve/priv/authorized_keys and links /root/.ssh/authorized_keys to it. This adds Semaphore's key (extra var
+# hisho_semaphore_key) and any keys in proxmox_root_keys there, removes nothing, and puts the link back where an
+# earlier plain-file edit replaced it (keeping every key that file had). Guarded: confirm_proxmox_root_keys=true.
+- name: Proxmox root keys
+  hosts: proxmox_hosts
+  gather_facts: false
+  ignore_unreachable: true
+  pre_tasks:
+    - name: Hisho maintenance gate
+      ansible.builtin.import_tasks: ../tasks/hisho_maintenance_gate.yml
+  vars:
+    pve_keys: /etc/pve/priv/authorized_keys
+    root_keys: /root/.ssh/authorized_keys
+  tasks:
+    - name: Refuse without the OK
+      ansible.builtin.assert:
+        that: confirm_proxmox_root_keys | default(false) | bool
+        fail_msg: "Pass confirm_proxmox_root_keys=true (the Semaphore template does)."
+      run_once: true
+
+    - name: Where root's keys are
+      ansible.builtin.stat: {path: "{{ root_keys }}", follow: false}
+      register: rk
+
+    - name: Proxmox's own key file
+      ansible.builtin.stat: {path: "{{ pve_keys }}"}
+      register: pk
+
+    - name: Keys only in the plain file (kept)
+      ansible.builtin.command: cat {{ root_keys }}
+      register: plain
+      changed_when: false
+      when: pk.stat.exists and rk.stat.exists and not rk.stat.islnk
+
+    - name: Every key in Proxmox's file
+      ansible.builtin.lineinfile:
+        path: "{{ pve_keys if pk.stat.exists else root_keys }}"
+        line: "{{ item }}"
+        create: true
+        mode: "0600"
+      loop: >-
+        {{ ([hisho_semaphore_key | default('')] + (proxmox_root_keys | default([]))
+            + (plain.stdout_lines | default([]))) | map('trim') | select | unique | list }}
+
+    - name: Link /root/.ssh/authorized_keys back to it
+      ansible.builtin.file:
+        src: "{{ pve_keys }}"
+        dest: "{{ root_keys }}"
+        state: link
+        force: true
+      when: pk.stat.exists and rk.stat.exists and not rk.stat.islnk

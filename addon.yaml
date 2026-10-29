@@ -2,7 +2,10 @@
 # Shows each project's task templates with how their last run went, and runs a template when
 # you press its button (always asks first). It also adds and keeps in step the jobs listed in
 # ~/Hisho/System/Config/Addons/semaphore-templates.yaml (it never runs or deletes them), so a new
-# guarded job is one entry in your notes. Failed and missed scheduled runs, and a Semaphore that stops
+# guarded job is one entry in your notes. Hisho's own jobs (self-update, code sync, security review, reports, and the
+# Forgejo / secrets / Proxmox ones when those are on) go in a "Hisho" project it makes and keeps in step with its
+# machine list: by itself when Hisho installed Semaphore, after the card's "Add Hisho's jobs" button when you connected
+# one (hisho_jobs.py; playbooks in ansible/). Failed and missed scheduled runs, and a Semaphore that stops
 # answering, show in Needs you. Updates and maintenance stay in your playbooks. Needs an API token (Semaphore: your user menu >
 # API Tokens, or POST /api/user/tokens).
 name: semaphore
@@ -10,7 +13,7 @@ kind: integration
 secret_rotate: Semaphore > your user > API Tokens
 title: Semaphore (Ansible / Terraform)
 description: Your Semaphore servers' playbooks and Terraform jobs, their last runs, a run button, and new jobs added from your notes.
-version: 0.3.3
+version: 0.4.0
 you_need:
   - "A Semaphore UI server (Ansible and Terraform runner) you can reach from the Core machine"
   - "A Semaphore API token"
@@ -30,11 +33,13 @@ entry_schema:
   url: str                 # IP or name (http, port 3000 assumed), or the full URL
   token: password          # API token (typed, or its secret's name)
   timezone: "str?"         # the Semaphore's schedule time zone (SEMAPHORE_SCHEDULE_TIMEZONE); default UTC
+  playbooks: "str?"        # where Semaphore reads Hisho's playbooks (a path in its container); default /hisho/ansible
   note: "str?"
 entry_form:
   url: "IP address (or full URL)"
   token: "API token (paste it, or its secret's name)"
   timezone: "Schedule time zone (e.g. America/Los_Angeles; blank = UTC)"
+  playbooks: "Hisho's playbooks in Semaphore (blank = /hisho/ansible)"
   note: "Note"
 
 # Plain words for each field of the entry form (shown on the dashboard).
@@ -50,5 +55,8 @@ help:
   timezone:
     label: Time zone of its schedules (optional)
     say: "The time zone Semaphore runs its schedules in, like America/Los_Angeles. Hisho uses it to tell when a scheduled run was missed. Leave empty for UTC. Hisho's own install uses your time zone."
+  playbooks:
+    label: Where Semaphore reads Hisho's playbooks (optional)
+    say: "Only for a Semaphore you connected: the folder inside Semaphore's container that holds this add-on's ansible folder (mount it read-only there). Leave empty for /hisho/ansible, where Hisho's own install puts it."
   note:
     say: "Anything you want to remember about this server. Shown on its card."

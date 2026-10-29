@@ -1,6 +1,7 @@
 """Semaphore UI integration for Hisho (see addon.yaml). Runs inside Core."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -8,8 +9,13 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+_spec = importlib.util.spec_from_file_location("hisho_addon_semaphore_jobs", Path(__file__).with_name("hisho_jobs.py"))
+hisho_jobs = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(hisho_jobs)
 
 BAD = {"error", "failed", "stopped"}
 GRACE = 15 * 60        # a scheduled run that hasn't started 15 min after its time is a missed run
@@ -397,7 +403,8 @@ def summary(entries: dict[str, dict[str, Any]], ctx: Any) -> dict[str, Any]:
                                  "title": f"Semaphore {name} is not answering",
                                  "detail": f"for {int((_now() - since) // 60)} min: {str(exc)[:160]}. Its jobs aren't running or being watched."})
             continue
-        for title, sync in ((f"Can't add Hisho's jobs to Semaphore {name}", lambda: sync_templates(name, entry, ctx)),
+        for title, sync in ((f"Can't keep Hisho's own jobs in Semaphore {name}", lambda: auto_reconcile(name, entry, ctx)),
+                            (f"Can't add Hisho's jobs to Semaphore {name}", lambda: sync_templates(name, entry, ctx)),
                             (f"Can't update Semaphore {name}'s machine list", lambda: sync_inventory(entry, ctx)),
                             (f"Can't tell Semaphore {name} about maintenance", lambda: sync_maintenance(entry, ctx))):
             try:
@@ -433,6 +440,7 @@ def details(entries: dict[str, dict[str, Any]], ctx: Any) -> list[dict[str, Any]
         except Exception as exc:  # noqa: BLE001
             out.append({"title": name, "entry": name, "state": "down", "facts": [str(exc)[:200]], "items": []})
             continue
+        out.append(hisho_jobs_card(name, entry, ctx))
         for p in projects:
             items = []
             for tpl in sorted(p["templates"], key=lambda t: str(t.get("name"))):
@@ -472,6 +480,15 @@ def test(entry: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
 
 def act(entries: dict[str, dict[str, Any]], ctx: Any, entry: str, item: str, action: str) -> dict[str, Any]:
+    if item == "hisho-jobs" and action == "add-hisho-jobs":
+        res = reconcile(entry, entries[entry], ctx, first=True)
+        n, last = len(res["state"].get("jobs") or {}), res["state"].get("last") or {}
+        return {"ok": not res["problems"] or bool(res["state"].get("project_id")),
+                "message": f"{n} Hisho jobs set up in Semaphore {entry}"
+                           + (f"; {len(last.get('edited') or [])} edited ones left alone" if last.get("edited") else "")
+                           + (f"; {len(last.get('skipped') or [])} skipped" if last.get("skipped") else "")
+                           + (". " + "; ".join(res["problems"][:3]) if res["problems"] else "."),
+                **({"error": "; ".join(res["problems"][:3])} if res["problems"] and not res["state"].get("project_id") else {})}
     if action == "use-hisho-inventory" and item.endswith("-inventory") and item.split("-")[0].isdigit():
         return adopt_inventory(entries[entry], ctx, int(item.split("-")[0]))
     if action not in ("run", "retry"):
@@ -485,3 +502,178 @@ def act(entries: dict[str, dict[str, Any]], ctx: Any, entry: str, item: str, act
             return {"ok": False, "error": f"'{tpl.get('name')}' is a guarded job: open it and press run yourself"}
     task = call(entries[entry], ctx, "POST", f"/project/{project}/tasks", {"template_id": int(template)})
     return {"ok": True, "message": f"started Semaphore task {(task or {}).get('id')}; its result shows here when done"}
+
+
+# ── Hisho's own jobs (hisho_jobs.py): a "Hisho" project Hisho makes and keeps in step ──────────────────
+
+def installed_by_hisho(entry_name: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """Install in Hisho's record when this entry is the Semaphore Hisho installed (its ``main`` entry), else {}."""
+    from hisho import addons
+    rec = dict(((addons._fleet_data().get("addons") or {}).get("companions") or {}).get("semaphore") or {})
+    if rec.get("state") != "installed" or entry_name != "main":
+        return {}
+    url = str((rec.get("entry") or {}).get("url") or "")
+    return rec if not url or url == str(entry.get("url") or "") else {}
+
+
+def _entries_of(name: str) -> dict[str, Any] | None:
+    """Another add-on's entries, straight from its settings file; None when the file is there but unreadable
+    (then nothing is removed on its account)."""
+    from hisho import addons, fleet_config
+    path = addons.config_path(name)
+    if not path.exists():
+        return {}
+    try:
+        data = fleet_config.load_yaml(path) or {}
+    except Exception:  # noqa: BLE001
+        return None
+    return {str(k): dict(v or {}) for k, v in (data.get("entries") or {}).items()} if isinstance(data, dict) else None
+
+
+def _server_ssh():
+    from hisho import addons
+    try:
+        mod = addons.provider(addons.get("server"))
+    except Exception:  # noqa: BLE001 -- no Servers add-on here
+        return None
+    return getattr(mod, "_ssh_args", None)
+
+
+def reconcile(entry_name: str, entry: dict[str, Any], ctx: Any, *, first: bool = False,
+              key_only: list[str] | None = None) -> dict[str, Any]:
+    """Make, or bring back in step, Hisho's project in this Semaphore. ``first``: the owner's OK (Install in Hisho, or
+    the card's button): keys go on every machine now. Returns {"state", "problems"}."""
+    from hisho import addons, fleet_config
+    state = hisho_jobs.load_state(entry_name)
+    before = json.dumps(state, sort_keys=True, default=str)
+    problems: list[str] = []
+    api = lambda method, path, body=None: call(entry, ctx, method, path, body)  # noqa: E731
+    fleet, data = ctx.fleet, addons._fleet_data()
+    if fleet.source == "defaults" and fleet_config.fleet_path().exists():
+        return {"state": state, "problems": ["Fleet.yaml can't be read; Hisho's jobs left as they are"]}
+    servers = _entries_of("server") if "server" in addons.enabled() else {}
+    proxmox = _entries_of("proxmox")
+    readable = servers is not None and proxmox is not None
+    servers, proxmox = servers or {}, proxmox or {}
+    rec = installed_by_hisho(entry_name, entry)
+    owner_tz = str(fleet.timezone or entry.get("timezone") or "UTC")
+    sem_tz = str(entry.get("timezone") or (owner_tz if rec else "UTC"))
+    if rec and not entry.get("timezone") and fleet.timezone:   # Hisho's install runs schedules in the owner's zone
+        try:
+            addons.set_entry(addons.get("semaphore"), entry_name, {"timezone": owner_tz}, merge=True)
+        except Exception:  # noqa: BLE001
+            pass
+    if rec:
+        dest = Path(str(rec.get("dir") or "~/semaphore")).expanduser() / "hisho-ansible"
+        if dest.is_dir() and addons.is_local(str(rec.get("host") or fleet.core_host)):
+            hisho_jobs.refresh_playbooks(Path(__file__).with_name("ansible"), dest)
+    try:
+        done = hisho_jobs.ensure_base(api, ctx, state, str(entry.get("playbooks") or hisho_jobs.PLAYBOOKS),
+                                      f"semaphore-hisho@{fleet.core_host}")
+        text = hisho_jobs.render_inventory(hisho_jobs.machines(fleet, data, servers, proxmox))
+        done += hisho_jobs.sync_inventory(api, state, text)
+        feat = hisho_jobs.features(data, addons.enabled(), proxmox)
+        wanted = hisho_jobs.jobs(feat, str(state.get("public_key") or ""))
+        crons = {j["key"]: hisho_jobs.cron_for(j["when"], owner_tz, sem_tz) for j in wanted if j["when"]}
+        res = hisho_jobs.sync_jobs(api, state, wanted, crons, may_remove=readable)
+    except Exception as exc:  # noqa: BLE001
+        problems.append(str(exc)[:200])
+        res, done = {"done": [], "edited": [], "skipped": []}, []
+    if state.get("public_key"):
+        targets = hisho_jobs.key_targets(fleet, servers, _server_ssh(), addons.is_local)
+        problems_keys = hisho_jobs.place_key(ctx, state["public_key"], targets, state, only=key_only,
+                                             now=_now(), force=first or bool(key_only))
+    else:
+        problems_keys = []
+    state["last"] = {"done": done + res["done"], "edited": res["edited"], "skipped": res["skipped"],
+                     "keys": problems_keys, "problems": problems}
+    if json.dumps(state, sort_keys=True, default=str) != before:
+        hisho_jobs.save_state(entry_name, state)
+    return {"state": state, "problems": problems}
+
+
+def auto_reconcile(entry_name: str, entry: dict[str, Any], ctx: Any) -> list[str]:
+    """Every sync: keep Hisho's project in step where it was set up (Install in Hisho, or the card's button). A
+    Semaphore that was only connected gets nothing until the button is pressed."""
+    state = hisho_jobs.load_state(entry_name)
+    first = not state.get("project_id")
+    if first and not installed_by_hisho(entry_name, entry):
+        return []
+    res = reconcile(entry_name, entry, ctx, first=first)
+    if res["problems"]:
+        raise RuntimeError("; ".join(res["problems"]))
+    return (res["state"].get("last") or {}).get("done") or []
+
+
+def adopted(entries: dict[str, dict[str, Any]], ctx: Any, machine: str) -> dict[str, Any]:
+    """`hisho adopt` / `hisho create` / Add a machine: the new machine gets Semaphore's key (one line added to its
+    authorized_keys, nothing removed) and joins Hisho's inventory. When this machine can't reach Semaphore's token
+    (adopting from the workstation), Core's next sync adds it to the inventory within a minute."""
+    errors = []
+    for name, entry in entries.items():
+        state = hisho_jobs.load_state(name)
+        if not state.get("project_id"):
+            continue
+        try:
+            res = reconcile(name, entry, ctx, key_only=[f"machine:{machine}"])
+            keys = (res["state"].get("last") or {}).get("keys") or []
+            if f"machine:{machine}" not in (res["state"].get("keyed") or []):
+                errors += keys or [f"Semaphore's key not on {machine}"]
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Semaphore {name}: {str(exc)[:160]}")
+    return {"ok": not errors, **({"error": "; ".join(errors)[:300]} if errors else {})}
+
+
+def fleet_changed(entries: dict[str, dict[str, Any]], ctx: Any, event: str, info: dict[str, Any]) -> dict[str, Any]:
+    """Core tells integrations when the machine list changes: ``machine-removed`` (hisho retire), ``entry-set`` /
+    ``entry-removed`` (an add-on entry; Servers and Proxmox ones matter here) and ``companion-installed`` (Install in
+    Hisho: Semaphore's own, which sets everything up at once)."""
+    addon = str(info.get("addon") or "")
+    if event == "companion-installed" and addon != "semaphore":
+        return {"ok": True}
+    if event in ("entry-set", "entry-removed") and addon not in ("server", "proxmox"):
+        return {"ok": True}
+    out = []
+    for name, entry in entries.items():
+        if event == "companion-installed":
+            if not installed_by_hisho(name, entry):
+                continue
+        elif not hisho_jobs.load_state(name).get("project_id"):
+            continue
+        only = [f"server:{info.get('entry')}"] if event == "entry-set" and addon == "server" else None
+        res = reconcile(name, entry, ctx, first=event == "companion-installed", key_only=only)
+        out += res["problems"]
+    return {"ok": not out, **({"error": "; ".join(out)[:300]} if out else {})}
+
+
+def hisho_jobs_card(name: str, entry: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    state = hisho_jobs.load_state(name)
+    last = state.get("last") or {}
+    if not state.get("project_id"):
+        auto = bool(installed_by_hisho(name, entry))
+        return {"title": f"{name} · Hisho's jobs", "entry": name, "state": "off",
+                "facts": ["Hisho sets these up by itself on its next check" if auto else
+                          "Not set up: Hisho's own jobs (self-update, code sync, reports, and Forgejo / Proxmox ones "
+                          "when those are on) can go in a Semaphore project of their own"],
+                "items": [] if auto else [{
+                    "id": "hisho-jobs", "name": "Hisho's jobs: not set up", "state": "off",
+                    "facts": [f"Playbooks are read from {entry.get('playbooks') or hisho_jobs.PLAYBOOKS} inside "
+                              "Semaphore's container (Hisho's own install mounts them there)"],
+                    "actions": [{"id": "add-hisho-jobs", "label": "Add Hisho's jobs",
+                                 "confirm": f"Make a '{hisho_jobs.PROJECT}' project in Semaphore {name} with Hisho's "
+                                            "jobs, an inventory of Hisho's machines and an SSH key for Semaphore, and "
+                                            "put that key on your machines (one line added, nothing removed)? Nothing "
+                                            "runs now, and jobs you already have are not changed."}]}]}
+    n = len(state.get("jobs") or {})
+    facts = [f"{n} Hisho jobs set up", f"Semaphore's key on {len(state.get('keyed') or [])} machines"]
+    facts += [f"Edited, left alone: {', '.join(last['edited'])}"] if last.get("edited") else []
+    facts += [f"Skipped: {'; '.join(last['skipped'])}"] if last.get("skipped") else []
+    facts += last.get("keys") or []
+    return {"title": f"{name} · Hisho's jobs", "entry": name,
+            "state": "warn" if last.get("problems") or last.get("keys") else "ok", "facts": facts[:8],
+            "items": [{"id": "hisho-jobs", "name": f"{n} Hisho jobs set up", "state": "up",
+                       "facts": [f"project {hisho_jobs.PROJECT}, inventory {hisho_jobs.INVENTORY} (kept in step with "
+                                 "Hisho's machine list)"],
+                       "actions": [{"id": "add-hisho-jobs", "label": "check again",
+                                    "confirm": "Add any of Hisho's jobs that are missing and put Semaphore's key on "
+                                               "machines that don't have it yet? Edited jobs stay as they are."}]}]}

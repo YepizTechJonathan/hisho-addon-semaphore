@@ -1,0 +1,28 @@
+---
+# Adds Semaphore's own SSH key (the one Hisho made for it, extra var hisho_semaphore_key) to the connecting user's
+# ~/.ssh/authorized_keys on every machine in the inventory. Only adds the line; removes nothing. Hisho already puts
+# the key on each machine it adds; this button puts it back where it went missing (and Semaphore can still log in
+# some other way). Proxmox servers have their own button (proxmox-root-keys.yml: root's keys live in
+# /etc/pve/priv). Guarded: the template passes confirm_authorized_keys=true, so pressing Run is the OK.
+- name: Semaphore's key on every machine
+  hosts: all:!proxmox_hosts
+  gather_facts: false
+  ignore_unreachable: true
+  pre_tasks:
+    - name: Hisho maintenance gate
+      ansible.builtin.import_tasks: ../tasks/hisho_maintenance_gate.yml
+  tasks:
+    - name: Refuse without the OK
+      ansible.builtin.assert:
+        that:
+          - confirm_authorized_keys | default(false) | bool
+          - hisho_semaphore_key | default('') is match('^ssh-(ed25519|rsa) ')
+        fail_msg: "Pass confirm_authorized_keys=true and hisho_semaphore_key (the Semaphore template does)."
+      run_once: true
+
+    - name: The key in ~/.ssh/authorized_keys (added, never removed)
+      ansible.builtin.lineinfile:
+        path: "~/.ssh/authorized_keys"
+        line: "{{ hisho_semaphore_key }}"
+        create: true
+        mode: "0600"

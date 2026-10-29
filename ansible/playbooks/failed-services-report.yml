@@ -1,0 +1,36 @@
+---
+# Read-only: systemd units that failed on each machine (system and the connecting user's own).
+- name: Failed services report
+  hosts: all
+  gather_facts: false
+  ignore_unreachable: true
+  pre_tasks:
+    - name: Hisho maintenance gate
+      ansible.builtin.import_tasks: ../tasks/hisho_maintenance_gate.yml
+  tasks:
+    - name: systemctl there?
+      ansible.builtin.command: sh -c 'command -v systemctl'
+      changed_when: false
+      failed_when: false
+      register: has_systemctl
+
+    - name: Failed system units
+      ansible.builtin.command: systemctl --failed --no-pager --plain --no-legend
+      changed_when: false
+      failed_when: false
+      register: failed_system
+      when: has_systemctl.rc == 0
+
+    - name: Failed user units
+      ansible.builtin.shell: XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user --failed --no-pager --plain --no-legend
+      changed_when: false
+      failed_when: false
+      register: failed_user
+      when: has_systemctl.rc == 0
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          failed_system_units: "{{ failed_system.stdout_lines | default(['systemctl not available']) }}"
+          failed_user_units: "{{ failed_user.stdout_lines | default([]) }}"

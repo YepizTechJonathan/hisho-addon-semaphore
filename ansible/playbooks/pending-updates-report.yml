@@ -1,0 +1,34 @@
+---
+# Read-only: how many package updates wait on each machine (Debian/Ubuntu apt, Arch pacman).
+- name: Pending updates report
+  hosts: all
+  gather_facts: true
+  ignore_unreachable: true
+  pre_tasks:
+    - name: Hisho maintenance gate
+      ansible.builtin.import_tasks: ../tasks/hisho_maintenance_gate.yml
+  tasks:
+    - name: apt
+      ansible.builtin.shell: |
+        set -o pipefail
+        apt-get -s upgrade | awk '/^Inst / {print $2 " " $3 " -> " $4}'
+      args: {executable: /bin/bash}
+      changed_when: false
+      failed_when: false
+      register: apt_updates
+      when: ansible_facts.os_family | default('') == 'Debian'
+
+    - name: pacman
+      ansible.builtin.command: pacman -Qu
+      changed_when: false
+      failed_when: false
+      register: pacman_updates
+      when: ansible_facts.os_family | default('') == 'Archlinux'
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          os_family: "{{ ansible_facts.os_family | default('unknown') }}"
+          pending_update_count: "{{ (apt_updates.stdout_lines | default([])) | length + (pacman_updates.stdout_lines | default([])) | length }}"
+          pending_updates: "{{ apt_updates.stdout_lines | default(pacman_updates.stdout_lines | default([])) }}"

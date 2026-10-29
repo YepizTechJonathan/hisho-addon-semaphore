@@ -1,0 +1,51 @@
+---
+# Runs one of Hisho's own jobs on the Core machine (inventory group hisho_core): starts its systemd user unit,
+# waits for it, then shows that run's log. The job itself is Hisho's (deploy/systemd/<unit>.service in the hisho
+# repo); Semaphore is only the scheduler, runner and log. Template extra var: hisho_unit=hisho-<job> (or
+# hisho-<job>@<instance> for a per-server unit such as hisho-proxmox-update@<server>).
+- name: Run a Hisho job
+  hosts: hisho_core
+  gather_facts: false
+  pre_tasks:
+    - name: Hisho maintenance gate
+      ansible.builtin.import_tasks: ../tasks/hisho_maintenance_gate.yml
+  tasks:
+    - name: Only Hisho's own units
+      ansible.builtin.assert:
+        that: hisho_unit is defined and hisho_unit is match('^hisho-[a-z0-9-]+(@[a-z0-9-]+)?$')
+        fail_msg: "Pass hisho_unit=hisho-<job> (the Semaphore template does)."
+
+    - name: Who runs it
+      ansible.builtin.command: id -u
+      register: uid
+      changed_when: false
+
+    - name: Note the start time
+      ansible.builtin.command: date +%s
+      register: started
+      changed_when: false
+
+    - name: Run {{ hisho_unit }}.service and wait for it
+      ansible.builtin.command: systemctl --user start --wait {{ hisho_unit }}.service
+      environment: {XDG_RUNTIME_DIR: "/run/user/{{ uid.stdout }}"}
+      register: run
+      changed_when: true
+      failed_when: false
+
+    - name: Its log
+      ansible.builtin.command: >-
+        journalctl --user -u {{ hisho_unit }}.service --since @{{ started.stdout }} -o short-iso --no-pager
+      environment: {XDG_RUNTIME_DIR: "/run/user/{{ uid.stdout }}"}
+      register: log
+      changed_when: false
+      failed_when: false
+
+    - name: Show it
+      ansible.builtin.debug:
+        msg: "{{ log.stdout_lines }}"
+
+    - name: Result
+      ansible.builtin.assert:
+        that: run.rc == 0
+        fail_msg: "{{ hisho_unit }}.service failed (exit {{ run.rc }}); see the log above."
+        success_msg: "{{ hisho_unit }}.service finished OK."

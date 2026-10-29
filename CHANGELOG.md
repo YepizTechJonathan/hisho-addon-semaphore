@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Hisho's own jobs: a "Hisho" project in Semaphore with Hisho's jobs (self-update, code sync, security review, patch dry run and daily reports, plus Forgejo, secrets mirror and Proxmox jobs when those are on), an inventory made from Hisho's machine list, an SSH key for Semaphore placed on every machine (one line added, nothing removed), and the playbooks shipped in `ansible/` read from a local path (no GitHub). Set up by itself after Install in Hisho; a connected Semaphore gets the card's **Add Hisho's jobs** button.
+- Idempotent: adds what is missing, never a second copy, never overwrites a job or schedule you edited (reported on the card). A machine, Servers entry or Proxmox entry added to Hisho joins at once (inventory, key, its update button); removing one drops it from the inventory and removes the per-server job Hisho made, unless edited.
+- New optional entry field `playbooks` (where Semaphore reads Hisho's playbooks; default `/hisho/ansible`).
+
 ## 0.3.3
 
 - Every field on its setup form says in plain words what it is, and links to where to get it (addon.yaml `help:`, shown by Hisho's dashboard).

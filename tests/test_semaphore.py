@@ -65,7 +65,9 @@ def test_the_semaphore_integration_lists_jobs_flags_failures_and_runs_one(fleet,
     n_put = sum(1 for c in calls if c[0] == "PUT")
     addons.summarize(sem, ctx)
     assert sum(1 for c in calls if c[0] == "PUT") == n_put + 1  # the stub keeps answering "{}"
-    [sec] = addons.details(sem, ctx)
+    mine, sec = addons.details(sem, ctx)   # a connected Semaphore: Hisho's own jobs wait on the card's button
+    assert mine["title"] == "home · Hisho's jobs" and mine["items"][0]["actions"][0]["id"] == "add-hisho-jobs"
+    assert not any(c[0] == "POST" and c[1] == "/projects" for c in calls)
     assert [(i["name"], i["state"]) for i in sec["items"]] == [("Machine list: Semaphore's own", "off"),
                                                                 ("Patch offsite", "down"), ("Update Pangolin", "off")]
     # use Hisho's machine list: creates "Hisho dev" with the old inventory's SSH key, moves the jobs

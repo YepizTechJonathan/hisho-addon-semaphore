@@ -1,0 +1,39 @@
+---
+# Read-only: what an upgrade would install on each Debian/Ubuntu machine, and whether it waits on a reboot.
+# Installs nothing (apt-get -s). Needs sudo without a password for apt-get update; without it the list is
+# what the machine last fetched.
+- name: Patch dry run
+  hosts: all
+  gather_facts: true
+  ignore_unreachable: true
+  pre_tasks:
+    - name: Hisho maintenance gate
+      ansible.builtin.import_tasks: ../tasks/hisho_maintenance_gate.yml
+  tasks:
+    - name: Refresh the package lists (sudo, if allowed)
+      ansible.builtin.command: sudo -n apt-get update -qq
+      changed_when: false
+      failed_when: false
+      when: ansible_facts.os_family | default('') == 'Debian'
+
+    - name: Simulate the upgrade
+      ansible.builtin.shell: |
+        set -o pipefail
+        apt-get -s dist-upgrade | sed -n '1,120p'
+      args: {executable: /bin/bash}
+      changed_when: false
+      failed_when: false
+      register: apt_sim
+      when: ansible_facts.os_family | default('') == 'Debian'
+
+    - name: Reboot waiting?
+      ansible.builtin.stat: {path: /var/run/reboot-required}
+      register: reboot_required
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          os_family: "{{ ansible_facts.os_family | default('unknown') }}"
+          reboot_required: "{{ reboot_required.stat.exists | default(false) }}"
+          apt_simulation: "{{ apt_sim.stdout_lines | default(['not Debian/Ubuntu']) }}"

@@ -1,0 +1,12 @@
+---
+# Hisho maintenance gate. Hisho keeps the Semaphore environment variables `hisho_maintenance` (every machine in
+# maintenance) and `hisho_maintenance_all` (the whole fleet is) up to date. A machine listed there is skipped
+# quietly instead of failing the run. Names are matched without case against the inventory name, ansible_host
+# and an optional `hisho_name` host variable.
+- name: Skip machines Hisho has in maintenance
+  ansible.builtin.meta: end_host
+  when: >-
+    (hisho_maintenance_all | default(false) | bool)
+    or ([inventory_hostname, ansible_host | default(''), hisho_name | default('')]
+        | map('lower') | intersect(hisho_maintenance | default([]) | map('lower') | list)
+        | length > 0)
