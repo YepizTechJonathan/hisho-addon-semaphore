@@ -158,7 +158,15 @@ def state():
 
 
 ALWAYS = {"Hisho Core Self-Update", "Hisho Code Sync", "Weekly Security Review", "OS Patch Dry Run",
-          "Pending Updates Report", "Failed Services Report", "Disk Usage Report", "Authorized Keys - Manual Guarded"}
+          "Pending Updates Report", "Failed Services Report", "Disk Usage Report", "Authorized Keys - Manual Guarded",
+          "Hisho Secret Notes"}   # the last one because the test fleet keeps secrets in Infisical
+
+
+def test_secret_notes_only_with_a_secrets_store():
+    hj = mod_jobs()
+    names = lambda backends: {j["name"] for j in hj.jobs(hj.features({"secrets": {"backends": backends}}, {}, {}), PUB)}  # noqa: E731
+    assert "Hisho Secret Notes" not in names(["local"])
+    assert "Hisho Secret Notes" in names(["infisical"]) and "Hisho Secret Notes" in names(["bws"])
 
 
 def test_install_in_hisho_sets_up_the_project_and_a_second_run_changes_nothing(sem):
@@ -192,7 +200,7 @@ def test_install_in_hisho_sets_up_the_project_and_a_second_run_changes_nothing(s
     assert crons == {"Hisho Core Self-Update": "40 * * * *", "Hisho Code Sync": "20 * * * *",
                      "Weekly Security Review": "30 6 * * 1", "OS Patch Dry Run": "0 5 * * 6",
                      "Pending Updates Report": "0 6 * * *", "Failed Services Report": "5 6 * * *",
-                     "Disk Usage Report": "10 6 * * *"}
+                     "Disk Usage Report": "10 6 * * *", "Hisho Secret Notes": "50 * * * *"}
     assert all(s["active"] for s in sem.all("schedules"))
     # Semaphore's key went on every machine: this one locally, the others over their SSH alias, one line added
     placed = [c for c in sem.ran if c[0] in ("sh", "ssh")]
@@ -214,7 +222,7 @@ def test_install_in_hisho_sets_up_the_project_and_a_second_run_changes_nothing(s
     assert sem.writes()[n_writes:] == []
     assert len(sem.ran) == n_ran
     card = next(d for d in addons.details(sem.addon) if d["title"] == "main · Hisho's jobs")
-    assert card["facts"][0] == "8 Hisho jobs set up"
+    assert card["facts"][0] == "9 Hisho jobs set up"
 
 
 def test_a_connected_semaphore_gets_nothing_until_the_button(sem):
@@ -225,7 +233,7 @@ def test_a_connected_semaphore_gets_nothing_until_the_button(sem):
     [item] = card["items"]
     assert item["actions"][0]["id"] == "add-hisho-jobs" and item["actions"][0]["confirm"]
     res = addons.act(sem.addon, "main", "hisho-jobs", "add-hisho-jobs")
-    assert res["ok"] and res["message"].startswith("8 Hisho jobs set up"), res
+    assert res["ok"] and res["message"].startswith("9 Hisho jobs set up"), res
     assert set(templates(sem)) == ALWAYS
     assert "timezone" not in addons.entries(sem.addon)["main"]   # a connected one keeps its own (UTC here)
     crons = {s["name"]: s["cron_format"] for s in sem.all("schedules")}
@@ -420,7 +428,7 @@ def test_every_unit_a_job_runs_exists_in_hisho(sem):
     if not units.is_dir():
         pytest.skip("not a Hisho checkout")
     hj = mod_jobs()
-    for job in hj.jobs({"forgejo": True, "secrets_mirror": True, "proxmox": ["pve-a"]}, PUB):
+    for job in hj.jobs({"forgejo": True, "secrets_mirror": True, "secret_notes": True, "proxmox": ["pve-a"]}, PUB):
         unit = job["extra"].get("hisho_unit")
         if unit:
             name = re.sub(r"@.*", "@", unit) + ".service"

@@ -13,7 +13,7 @@ kind: integration
 secret_rotate: Semaphore > your user > API Tokens
 title: Semaphore (Ansible / Terraform)
 description: Your Semaphore servers' playbooks and Terraform jobs, their last runs, a run button, and new jobs added from your notes.
-version: 0.4.0
+version: 0.4.1
 you_need:
   - "A Semaphore UI server (Ansible and Terraform runner) you can reach from the Core machine"
   - "A Semaphore API token"

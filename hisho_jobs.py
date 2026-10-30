@@ -69,9 +69,11 @@ def _name(text: Any) -> str:
 
 
 def features(fleet_data: dict[str, Any], enabled: dict[str, Any], proxmox_entries: dict[str, Any]) -> dict[str, Any]:
-    """Which conditional jobs apply: Forgejo on, a second secrets backend, Proxmox entries."""
+    """Which conditional jobs apply: Forgejo on, a secrets store (Infisical or Bitwarden), a second secrets backend,
+    Proxmox entries."""
     backends = list(((fleet_data.get("secrets") or {}).get("backends")) or [])
     return {"forgejo": "forgejo" in enabled, "secrets_mirror": len(backends) >= 2,
+            "secret_notes": bool({"infisical", "bws"} & set(backends)),
             "proxmox": sorted(_name(e) for e, v in (proxmox_entries or {}).items() if (v or {}).get("url"))
             if "proxmox" in enabled else []}
 
@@ -116,6 +118,10 @@ def jobs(feat: dict[str, Any], public_key: str) -> list[dict[str, Any]]:
         out.append(_unit("secrets-mirror", "Hisho Secrets Mirror", "hisho-secrets-mirror", (40, 20, None),
                          "Copies new or changed secrets to the second secrets store (never deletes), 8:40 PM.",
                          "secrets"))
+    if feat.get("secret_notes"):
+        out.append(_unit("secret-notes", "Hisho Secret Notes", "hisho-secret-notes", (50, None, None),
+                         "Drafts the missing four-line comments on secrets (hisho secret notes --fill --write), "
+                         "hourly at :50.", "secrets"))
     hosts = list(feat.get("proxmox") or [])
     if hosts:
         out += [

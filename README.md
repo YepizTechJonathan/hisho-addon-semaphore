@@ -73,6 +73,7 @@ What it makes in that project:
 | Forgejo Upgrade - Manual Guarded | button | Forgejo is on |
 | Hisho Add-on Mirror | hourly at :06 | Forgejo is on |
 | Hisho Secrets Mirror | daily 8:40 PM | a second secrets store |
+| Hisho Secret Notes | hourly at :50 | Infisical or Bitwarden as a secrets store |
 | Proxmox Updates - Weekly Guarded | Sundays 11:30 PM | Proxmox servers |
 | Proxmox Update Check | daily 6:15 AM | Proxmox servers |
 | Proxmox Update - *server* - Manual Guarded | button, one per server | Proxmox servers |

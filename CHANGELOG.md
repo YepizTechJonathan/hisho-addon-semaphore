@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Hisho Secret Notes job, hourly at :50 (when Infisical or Bitwarden is a secrets backend): Hisho writes the four-line comment on any secret that has none.
+
 ## 0.4.0
 
 - Hisho's own jobs: a "Hisho" project in Semaphore with Hisho's jobs (self-update, code sync, security review, patch dry run and daily reports, plus Forgejo, secrets mirror and Proxmox jobs when those are on), an inventory made from Hisho's machine list, an SSH key for Semaphore placed on every machine (one line added, nothing removed), and the playbooks shipped in `ansible/` read from a local path (no GitHub). Set up by itself after Install in Hisho; a connected Semaphore gets the card's **Add Hisho's jobs** button.
